@@ -1001,11 +1001,6 @@ override:
             mu.buffer = new GLBuffer(BufferType.uniform);
             mu.buffer.dataUsage(BuffUsageType.dynamicData);
 
-            glGetActiveUniformBlockiv(id, i, GL_UNIFORM_BLOCK_DATA_SIZE, &usize);
-            mu.size = usize;
-
-            mu.buffer.allocate(mu.size);
-
             ublocks ~= mu;
         }
     }
@@ -2008,7 +2003,7 @@ override:
                 {
                     createEGLAny(window, attribs);
                 } else
-                    createPosixImpl(window, attribs);
+                    createGLXPosixImpl(window, attribs);
             } else
             version(Windows)
             {

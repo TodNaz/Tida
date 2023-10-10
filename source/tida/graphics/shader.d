@@ -303,6 +303,7 @@ extern(C)
 	alias spvc_compiler_get_specialization_constants_f = int function(spvc_compiler, spvc_specialization_constant**, size_t*);
 	alias spvc_compiler_create_shader_resources_f = int function(spvc_compiler, spvc_resources*);
 	alias spvc_resources_get_resource_list_for_type_f = int function(spvc_resources, spvc_resource_type, spvc_reflected_resource**, size_t*);
+	alias spvc_compiler_get_decorationf = uint function(spvc_compiler, int, SpvDecoration);
 }
 
 __gshared
@@ -320,6 +321,7 @@ __gshared
 	spvc_compiler_get_specialization_constants_f spvc_compiler_get_specialization_constants;
 	spvc_compiler_create_shader_resources_f spvc_compiler_create_shader_resources;
 	spvc_resources_get_resource_list_for_type_f spvc_resources_get_resource_list_for_type;
+	spvc_compiler_get_decorationf spvc_compiler_get_decoration;
 }
 
 enum ShaderSourceType
@@ -369,6 +371,7 @@ void spirvLoad()
 	lib.bindSymbol(cast(void**) &spvc_compiler_get_specialization_constants, "spvc_compiler_get_specialization_constants");
 	lib.bindSymbol(cast(void**) &spvc_compiler_create_shader_resources, "spvc_compiler_create_shader_resources");
 	lib.bindSymbol(cast(void**) &spvc_resources_get_resource_list_for_type, "spvc_resources_get_resource_list_for_type");
+	lib.bindSymbol(cast(void**) &spvc_compiler_get_decoration, "spvc_compiler_get_decoration");
 
 }
 
@@ -381,7 +384,9 @@ struct UBInfo
 	{
 		size_t result;
 		size_t offset = 0;
-		foreach (i, e; ranges) {
+		foreach (i, e; ranges)
+		{
+			immutable aligned = e.offset == 0 ? 0 : 0;
 			result += e.range;
 			offset += e.offset;
 		}
@@ -492,12 +497,15 @@ class ShaderCompiler
 			foreach (e; rs[0 .. numRS])
 			{
 				UBInfo info;
-				info.id = e.id;
 
 				spvc_buffer_range* ranges;
 				size_t numRanges;
 				spvc_compiler_get_active_buffer_ranges(compiler, e.id, &ranges, &numRanges);
 				info.ranges = ranges[0 .. numRanges];
+
+				info.id = spvc_compiler_get_decoration(
+					compiler, e.id, SpvDecoration.SpvDecorationBinding
+				);
 
 				ubos ~= info;
 			}

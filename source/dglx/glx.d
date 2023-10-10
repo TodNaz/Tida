@@ -117,7 +117,8 @@ void loadGLXLibrary() @trusted
     else
         immutable splitPoint = ":";
 
-    immutable string[] glxDefaultPaths = environment.get("PATH").split(splitPoint);
+    immutable string[] glxDefaultPaths =    environment.get("PATH").split(splitPoint) ~ 
+                                            environment.get("LD_LIBRARY_PATH").split(splitPoint);
 
     string[] pathes;
 

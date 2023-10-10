@@ -21,8 +21,16 @@ class DX11Shader : IShaderManip
     ID3D11Device device;
     ID3D11DeviceContext ctx;
     string _src;
-    DX11Buffer[] buffers;
-    UBInfo[] ubos;
+    // DX11Buffer[] buffers;
+    // UBInfo[] ubos;
+
+    struct Memory
+    {
+        UBInfo ub;
+        DX11Buffer buffer;
+    }
+
+    Memory[] memories;
 
     union Sh
     {
@@ -114,15 +122,15 @@ class DX11Shader : IShaderManip
             _src = src;
         }
 
-        this.ubos = compiler.ubos;
-
-        foreach (e; compiler.ubos)
+        foreach_reverse (e; compiler.ubos)
         {
+            Memory mem;
             DX11Buffer buffer = new DX11Buffer(BufferType.uniform, device, ctx);
-            debug { import std.stdio : writeln; try { writeln("SIZE: ", e.sizeBuffer); } catch (Exception) {} }
-            buffer.allocate(e.sizeBuffer());
 
-            buffers ~= buffer;
+            mem.buffer = buffer;
+            mem.ub = e;
+
+            memories ~= mem;
         }
 
         ID3D10Blob error;
@@ -240,22 +248,22 @@ class DX11ShaderProgram : IShaderProgram
 
     size_t getUniformBlocks() @safe
     {
-        return mainShader().buffers.length;
+        return mainShader().memories.length;
     }
 
     void setUniformData(uint id, void[] data) @safe
     {
-        mainShader().buffers[id].bindData(data);
+        mainShader().memories[id].buffer.bindData(data);
     }
 
     void setUniformBuffer(uint id, IBuffer buffer) @safe
     {
-        mainShader().buffers[id] = cast(DX11Buffer) buffer;
+        mainShader().memories[id].buffer = cast(DX11Buffer) buffer;
     }
 
     IBuffer getUniformBuffer(uint id) @safe
     {
-        return mainShader().buffers[id];
+        return mainShader().memories[id].buffer;
     }
 
     uint getUniformBufferAlign() @safe
@@ -429,29 +437,47 @@ class DX11Buffer : IBuffer
     /// only be entered once.
     void bindData(inout void[] data) @trusted
     {
-        if(id !is null)
+        if (size == data.length)
         {
-            (cast(ID3D11Buffer) id).Release();
-            id = null;
-        }
-
-        D3D11_BUFFER_DESC bd;
-        bd.Usage = _usage;
-        bd.ByteWidth = cast(uint) data.length;
-        bd.BindFlags = _bind;
-        bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-
-        D3D11_SUBRESOURCE_DATA idata;
-        idata.pSysMem = cast(void*) data.ptr;
-
-        size = cast(uint) data.length;
-
-        cache = data.dup;
-
-        auto code = device.CreateBuffer(&bd, &idata, &id); 
-        if (FAILED(code))
+            void[] tdat = mapData();
+            tdat[0 .. data.length] = data[];
+            unmapData(); 
+        } else
         {
-            throw new Exception("[DX11] Cannot create buffer!");
+            if(id !is null)
+            {
+                (cast(ID3D11Buffer) id).Release();
+                id = null;
+            }
+            size = cast(uint) data.length;
+
+            if (size < 8)
+                size = 16;
+            else
+            if ((size % 16) != 0)
+            {
+                immutable crt = ((size / 16) + 1) * 16;
+                size += crt - size;
+            } 
+
+            D3D11_BUFFER_DESC bd;
+            bd.Usage = _usage;
+            bd.ByteWidth = cast(uint) size;
+            bd.BindFlags = _bind;
+            bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+            D3D11_SUBRESOURCE_DATA idata;
+            idata.pSysMem = cast(void*) data.ptr;
+
+            this.size = cast(uint) data.length;
+
+            cache = data.dup;
+
+            auto code = device.CreateBuffer(&bd, &idata, &id); 
+            if (FAILED(code))
+            {
+                throw new Exception("[DX11] Cannot create buffer!");
+            }
         }
     }
 
@@ -691,30 +717,19 @@ class DX11ShaderPipeline : IShaderPipeline
         ID3D11Buffer[] dxbs;
 
         context.VSSetShader(_vertex.vertex.object._vertex, null, 0);
-        // if (_vertex.vertex.buffers.length != 0)
-        // {
-        //     dxbs = dxbuffers(_vertex.vertex.buffers);
-        //     context.VSSetConstantBuffers(i, cast(UINT) dxbs.length, &dxbs[0]);
-        // }
 
-        foreach (ref e; _vertex.vertex.buffers)
+        foreach (ref e; _vertex.vertex.memories)
         {
-            context.VSSetConstantBuffers(i, 1, &e.id);
-            i++;
+            if (e.buffer.getSize() != 0)
+                context.VSSetConstantBuffers(e.ub.id, 1, &e.buffer.id);
         }
-        i = 0;
 
         context.PSSetShader(_fragment.fragment.object._pixel, null, 0);
-        // if (_fragment.fragment.buffers.length != 0)
-        // {   
-        //     dxbs = dxbuffers(_fragment.fragment.buffers);
-        //     context.PSSetConstantBuffers(i, cast(UINT) dxbs.length, &dxbs[0]);
-        // }
 
-        foreach (ref e; _fragment.fragment.buffers)
+        foreach (ref e; _fragment.fragment.memories)
         {
-            context.PSSetConstantBuffers(i, 1, &e.id);
-            i++;
+            if (e.buffer.getSize() != 0)
+                context.PSSetConstantBuffers(e.ub.id, 1, &e.buffer.id);
         }
 
         i = 0;
@@ -1517,23 +1532,23 @@ __gapi_blend_create:
     {
         DX11Texture dtex = cast(DX11Texture) texture;
 
-        if (dtex._active > states.length)
-        {
-            auto dstates = states.dup;
-            auto dviews = views.dup;
-            states = new ID3D11SamplerState[](dtex._active + 1);
-            views = new ID3D11ShaderResourceView[](dtex._active + 1);
-            states[0 .. dstates.length] = dstates[];
-            views[0 .. dviews.length] = dviews[];
-        } else
-        if (dtex._active == 0 && states.length == 0)
-        {
-            states = new ID3D11SamplerState[](1);
-            views = new ID3D11ShaderResourceView[](1);
-        }
+        // if (dtex._active > states.length)
+        // {
+        //     auto dstates = states.dup;
+        //     auto dviews = views.dup;
+        //     states = new ID3D11SamplerState[](dtex._active + 1);
+        //     views = new ID3D11ShaderResourceView[](dtex._active + 1);
+        //     states[0 .. dstates.length] = dstates[];
+        //     views[0 .. dviews.length] = dviews[];
+        // } else
+        // if (dtex._active == 0 && states.length == 0)
+        // {
+        //     states = new ID3D11SamplerState[](1);
+        //     views = new ID3D11ShaderResourceView[](1);
+        // }
 
-        states[dtex._active] = dtex.sampler;
-        views[dtex._active] = dtex.resource;
+        // states[dtex._active] = dtex.sampler;
+        // views[dtex._active] = dtex.resource;
 
         currTex ~= dtex;
     }

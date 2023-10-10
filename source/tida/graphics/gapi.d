@@ -489,9 +489,10 @@ void[] uniformBuilder(T...)(IShaderProgram program, uint id, T args) @trusted
     if (buffer is null)
         throw new Exception("Cannot get buffer from id " ~ to!string(id));
 
-    flushData = new ubyte[](buffer.getSize());
-    size_t offset = 0;
-    size_t asize = 0;
+    if (buffer.getSize() == 0)
+        buffer.allocate(aligned.sizeof);
+
+    flushData = new ubyte[](aligned.sizeof);
 
     flushData[] = cast(void[]) ((cast(void*) &aligned)[0 .. flushData.length]);
 
