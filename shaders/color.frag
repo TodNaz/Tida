@@ -4,7 +4,7 @@
 #version 420
 
 // Соглашение о стандартныйх fragment данных.
-layout (binding = 0) uniform Color
+layout (binding = 1, std140) uniform Color
 {
 	vec4 color;
 	vec2 size;

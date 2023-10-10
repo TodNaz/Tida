@@ -378,9 +378,14 @@ class Render : IRenderer
 
     this(Window window) @trusted
     {
+        import std.process : environment;
+
         this.window = window;
         gapi = createGraphManip(GraphBackend.autofind);
-        gapi.initialize(true);
+
+        bool isDiscrete = environment.get("TIDA_RENDER_DISCRETE_USE", "true") == "true";
+
+        gapi.initialize(isDiscrete);
         gapi.createAndBindSurface(
             window,
             GraphicsAttributes(8, 8, 8, 8, 24, BufferMode.doubleBuffer)

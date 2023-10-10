@@ -777,6 +777,15 @@ export:
         if (scene.events.OnShaderLoad !is null)
             scene.events.OnShaderLoad();
 
+        if (!scene.events.isCreate)
+        {
+            scene.events.isCreate = true;
+            foreach (fun; scene.events.OnCreateFunctions)
+            {
+                fun();
+            }
+        }
+
         AddSceneFunc lazyImpl = () @trusted
         {
             lazyAdd!(T)();
@@ -1693,6 +1702,7 @@ export:
 
         events.InitFunctions = [];
         events.StepFunctions = [];
+        events.OnCreateFunctions = [];
         events.EntryFunctions = [];
         events.RestartFunctions = [];
         events.LeaveFunctions = [];
@@ -1733,6 +1743,10 @@ export:
                     events.RestartFunctions ~= SceneEvents.FEEntry.create!(
                         Parameters!(__traits(getMember, scene, member))
                     )(cast(void delegate() @safe) &__traits(getMember, scene, member));
+                } else
+                static if (attributeIn!(T, event, member).type == Create)
+                {
+                    events.OnCreateFunctions ~= &__traits(getMember, scene, member);
                 } else
                 static if (attributeIn!(T, event, member).type == Entry)
                 {

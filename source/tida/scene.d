@@ -204,9 +204,12 @@ struct SceneEvents
         }
     }
 
+    bool isCreate = false;
+
     FEInit[] InitFunctions;
     FEStep[] StepFunctions;
     FEStep[][size_t] StepThreadFunctions;
+    FEStep[] OnCreateFunctions;
     FERestart[] RestartFunctions;
     FEEntry[] EntryFunctions;
     FELeave[] LeaveFunctions;

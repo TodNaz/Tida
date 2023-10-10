@@ -543,7 +543,7 @@ class MP3 : Wav
 
     override void load(string path) @trusted
     {
-        import core.stdc.stdlib : free;
+        import core.stdc.stdlib : free; 
 
         mp3dec_t mp3d;
         mp3dec_file_info_t info = mp3dec_load(mp3d,path,null,null);
@@ -559,7 +559,7 @@ class MP3 : Wav
 
     override void fromData(void[] cdat) @trusted
     {
-        import core.stdc.stdlib : free;
+        import core.stdc.stdlib : free;   
 
         mp3dec_t mp3d;
         mp3dec_file_info_t info;

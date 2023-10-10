@@ -992,7 +992,7 @@ override:
             glGetActiveUniformBlockiv(id, i, GL_UNIFORM_BLOCK_NAME_LENGTH, &namelen); 
             char[] name = new char[](namelen);
             glGetActiveUniformBlockName(id, i, namelen, null, &name[0]);
-            int block;
+            int block = 0;
             glGetActiveUniformBlockiv(id, i, GL_UNIFORM_BLOCK_BINDING, &block);
 
             int usize;
@@ -1002,9 +1002,9 @@ override:
             mu.buffer.dataUsage(BuffUsageType.dynamicData);
 
             glGetActiveUniformBlockiv(id, i, GL_UNIFORM_BLOCK_DATA_SIZE, &usize);
-            mu.buffer.allocate(usize);
-
             mu.size = usize;
+
+            mu.buffer.allocate(mu.size);
 
             ublocks ~= mu;
         }
@@ -1358,6 +1358,7 @@ override:
 class GLGraphManip : IGraphManip
 {
     import tdw = tida.window;
+    import egl.egl;
 
     GraphBackend backend() @safe { return GraphBackend.opengl; }
 
@@ -1415,6 +1416,7 @@ class GLGraphManip : IGraphManip
             import x11.Xutil;
             import tida.runtime;
             import dglx.glx;
+            import egl.egl;
 
             version(UseXCB)
             {
@@ -1443,16 +1445,20 @@ class GLGraphManip : IGraphManip
                     displayID = runtime.displayID;
                 }
 
-                loadGLXLibrary();
+                version(WithEGL)
+                {
+                    loadEGLLibrary();
+                } else
+                    loadGLXLibrary();
 
                 debug
                 {
                     scope(failure)
-                        logger.critical("GLX library is not a loaded!");
+                        logger.critical("GLX/EGL library is not a loaded!");
                 }
             }
 
-            void createPosixImpl(tdw.Window window, GraphicsAttributes attribs) @trusted
+            void createGLXPosixImpl(tdw.Window window, GraphicsAttributes attribs) @trusted
             {
                 import dglx.glx;
                 version(UseXCB) import xcb.xcb;
@@ -1797,6 +1803,50 @@ class GLGraphManip : IGraphManip
                 this.dc = deviceHandle;
             }
         }
+
+        version(WithEGL)
+        {
+            import egl.egl;
+            EGLDisplay dpy;
+            EGLSurface surf;
+            EGLContext ctx;
+
+            void createEGLAny(tdw.Window window, GraphicsAttributes attribs) @trusted
+            {
+                int major, minor;
+                version(Windows)
+                    dpy = eglGetDisplay(runtime.instance);
+                else
+                version(Posix)
+                    dpy = eglGetDisplay(runtime.display);
+
+                eglInitialize(dpy, &major, &minor);
+                int[] configAttributes =
+                [
+                    EGL_BUFFER_SIZE, 0,
+                    EGL_RED_SIZE, attribs.redSize,
+                    EGL_GREEN_SIZE, attribs.greenSize,
+                    EGL_BLUE_SIZE, attribs.blueSize,
+                    EGL_ALPHA_SIZE, attribs.alphaSize,
+                    0x303F, 12_430,
+                    EGL_DEPTH_SIZE, 24,
+                    0x3040, 0x0008, // opengl flag
+                    EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+                    0
+                ];
+
+                int numConfigs;
+                EGLConfig windowConfig;
+                eglChooseConfig(dpy, &configAttributes[0], &windowConfig, 1, &numConfigs);
+
+                int[] attribList = [0];
+                surf = eglCreateWindowSurface(dpy, windowConfig, window.handle, &attribList[0]);
+
+                int[] ctxAttribList = [0x3098, 4, 0x30FB, 2, 0x30FD, 0x00000001, 0];
+                ctx = eglCreateContext(dpy, windowConfig, null, &ctxAttribList[0]);
+                eglMakeCurrent(dpy, surf, surf, ctx);
+            }
+        }
     }
 
     GLPipeline currentProgram;
@@ -1892,36 +1942,12 @@ class GLGraphManip : IGraphManip
             foreach (i; 0 .. e.getUniformBlocks)
             {
                 GLShaderProgram.MemoryUniform mu = e.ublocks[i];
-                glBindBufferBase(GL_UNIFORM_BUFFER, mu.id, mu.buffer.id);
-                glUniformBlockBinding(e.id, index, mu.id);    
+                glBindBufferBase(GL_UNIFORM_BUFFER, index, mu.buffer.id);
                 index++;    
             }
         }
-
-        // if (currentProgram.vertexProgram !is null) 
-        //     numBlocks += currentProgram.vertexProgram.getUniformBlocks();
-        // if (currentProgram.fragmentProgram !is null) 
-        //     numBlocks += currentProgram.fragmentProgram.getUniformBlocks();
-        // if (currentProgram.geometryProgram !is null)
-        //     numBlocks += currentProgram.geometryProgram.getUniformBlocks();
     }
-
-    // void uniformUse(GLShaderProgram program, ref uint index) @trusted
-    // {
-    //     if (program is null) return;
-
-    //     foreach (e; program.ublocks)
-    //     {
-    //         glActiveShaderProgram(currentProgram.id, program.id);
-    //         glBindBufferBase(GL_UNIFORM_BUFFER, index, e.buffer.id);
-    //         glUniformBlockBinding(program.id, e.id, index);
-            
-    //         //gl
-            
-    //         index++;
-    //     }
-    // }
-
+    
     bool __capture = true;
     float _vx, _vy, _vw, _vh;
     tdw.Window window;
@@ -1952,7 +1978,12 @@ override:
             } else
             version(Windows)
             {
-                initializeWinInpl();
+                version(WithEGL)
+                {
+                    import egl.egl;
+                    loadEGLLibrary();
+                } else
+                    initializeWinInpl();
             }
         }
         logger.info("Success!");
@@ -1973,11 +2004,19 @@ override:
         {
             version(Posix)
             {
-                createPosixImpl(window, attribs);
+                version(WithEGL)
+                {
+                    createEGLAny(window, attribs);
+                } else
+                    createPosixImpl(window, attribs);
             } else
             version(Windows)
             {
-                createWinImpl(window, attribs);
+                version(WithEGL)
+                {
+                    createEGLAny(window, attribs);
+                } else
+                    createWinImpl(window, attribs);
             }
         }
 

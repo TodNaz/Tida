@@ -410,14 +410,79 @@ size_t allSizeOf(T)(T args) @safe
         return T.sizeof;
 }
 
-void uniformBuilder(T...)(IShaderProgram program, uint id, T args) @trusted
+template isScalar(T)
+{
+    enum isScalar = is(T == bool) || is(T == int) || is(T == float) || is(T == double);
+}
+
+template isVector(T)
+{
+    import std.traits, std.meta;
+    enum isVector = isStaticArray!(T) && isScalar!(ForeachType!(T));
+}
+
+template std140align(R)
+{
+    import std.traits : ForeachType, Unconst;
+
+    alias T = Unconst!(R);
+
+    static if (isScalar!T)
+    {
+        enum std140align = "4";
+    } else
+    static if (isVector!T)
+    {
+        static if (T.length == 1)
+            enum std140align = "4";
+        else
+        static if (T.length == 2)
+            enum std140align = "8";
+        else
+        static if (T.length == 3 || T.length == 4)
+            enum std140align = "16";
+    } else
+    static if (isMatrix!T)
+    {
+        enum std140align = std140align!(ForeachType!T);
+    }
+}
+
+template std140struct(T...)
+{
+    import std.typecons, std.conv, std.traits;
+    struct std140struct
+    {
+    //align(16):
+        static foreach (i, e; T)
+        {
+            mixin("align(" ~ std140align!(e) ~ ")" ~
+            "std.traits.Unconst!e __std140var" 
+            ~ to!string(i) ~ ";"
+            );
+        }
+
+        static auto build(T args) @trusted
+        {
+            std140struct upload;
+            static foreach (i, e; T)
+            {
+                mixin("upload.__std140var" ~ to!string(i) ~ " = args[" ~ to!string(i) ~ "];");
+            }
+
+            return upload;
+        }
+    }
+}
+
+void[] uniformBuilder(T...)(IShaderProgram program, uint id, T args) @trusted
 {
     import std.traits, std.conv;
 
     if (program.getUniformBlocks() < id || program.getUniformBlocks() == 0)
-        return;
+        return [];
 
-    immutable aligned = program.getUniformBufferAlign();
+    std140struct!(T) aligned = std140struct!(T).build(args);
 
     void[] flushData;
     IBuffer buffer = program.getUniformBuffer(id);
@@ -426,48 +491,12 @@ void uniformBuilder(T...)(IShaderProgram program, uint id, T args) @trusted
 
     flushData = new ubyte[](buffer.getSize());
     size_t offset = 0;
+    size_t asize = 0;
 
-    static foreach (e; args)
-    {
-        if (offset + allSizeOf(e) > flushData.length)
-        {
-            buffer.bindData(flushData);
-            return;
-        }
-
-        static if (is(e == float) || is(e == int))
-        {
-            flushData[offset .. offset += float.sizeof * 4] = cast(void[]) [e, 0.0f, 0.0f, 0.0f];
-        } else
-        static if (isStaticArray!(typeof(e)))
-        {
-            static if (isMatrix!(typeof(e)))
-            {
-                if (e.length == 4)
-                {
-                    flushData[offset .. offset += float.sizeof * 4 * 4] = cast(void[]) e;
-                } else
-                {
-                    foreach (darr; e)
-                    {
-                        flushData[offset .. offset += float.sizeof * darr.length] = (cast(void[]) darr[0 .. $]) ~ 
-                                                                            (cast(void[]) new float[](4 - darr.length));
-                    }
-                }
-            } else
-            {
-                static if (e.length == 4)
-                    flushData[offset .. offset += float.sizeof * 4] = cast(void[]) e;
-                else
-                {
-                    flushData[offset .. offset += float.sizeof * 4] = (cast(void[]) e[0 .. $]) ~ 
-                                                                            (cast(void[]) new float[](4 - e.length));
-                }
-            }
-        }
-    }
+    flushData[] = cast(void[]) ((cast(void*) &aligned)[0 .. flushData.length]);
 
     buffer.bindData(flushData);
+    return flushData;
 }
 
 interface IShaderPipeline

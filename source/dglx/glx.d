@@ -91,15 +91,6 @@ __gshared
 
 export:
 
-static string[] glxDefaultPaths = [
-    "/usr/lib/libGLX.so",
-    "/usr/lib/libGL.so",
-    "/usr/lib/libGLX_nvidia.so",
-    "/usr/lib64/libGLX.so.0",
-    "/usr/lib/x86_64-linux-gnu/libGL.so.1", 
-    "/usr/lib/x86_64-linux-gnu/libGLX.so.0"
-];
-
 /++
     Load GLX library, which should open context in x11 environment.
 
@@ -120,6 +111,13 @@ void loadGLXLibrary() @trusted
     }
 
     immutable configFile = configDir ~ "/glxlibpath";
+
+    version(Windows)
+        immutable splitPoint = ";";
+    else
+        immutable splitPoint = ":";
+
+    immutable string[] glxDefaultPaths = environment.get("PATH").split(splitPoint);
 
     string[] pathes;
 

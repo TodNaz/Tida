@@ -119,6 +119,7 @@ class DX11Shader : IShaderManip
         foreach (e; compiler.ubos)
         {
             DX11Buffer buffer = new DX11Buffer(BufferType.uniform, device, ctx);
+            debug { import std.stdio : writeln; try { writeln("SIZE: ", e.sizeBuffer); } catch (Exception) {} }
             buffer.allocate(e.sizeBuffer());
 
             buffers ~= buffer;
@@ -1178,7 +1179,7 @@ override:
             default: vendor = "UNDEFINED";  break;
         }
 
-        return [gpu, vendor];
+        return [vendor, gpu];
     }
 
     void pointSize(float size) @safe
@@ -1427,17 +1428,17 @@ __gapi_blend_create:
 
         context.RSSetState(rstate);
 
-        // foreach (DX11Texture e; currTex)
-        // {
-        //     context.PSSetSamplers(e._active, 1, &e.sampler);
-        //     context.PSSetShaderResources(e._active, 1, &e.resource);
-        // }
-
-        if (states.length != 0)
+        foreach (DX11Texture e; currTex)
         {
-            context.PSSetSamplers(0, cast(UINT) states.length, &states[0]);
-            context.PSSetShaderResources(0, cast(UINT) views.length, &views[0]);
+            context.PSSetSamplers(e._active, 1, &e.sampler);
+            context.PSSetShaderResources(e._active, 1, &e.resource);
         }
+
+        // if (states.length != 0)
+        // {
+        //     context.PSSetSamplers(0, cast(UINT) states.length, &states[0]);
+        //     context.PSSetShaderResources(0, cast(UINT) views.length, &views[0]);
+        // }
 
         context.Draw(count, first);
 
@@ -1466,17 +1467,17 @@ __gapi_blend_create:
 
         context.RSSetState(rstate);
         
-        // foreach (DX11Texture e; currTex)
-        // {
-        //     context.PSSetSamplers(e._active, 1, &e.sampler);
-        //     context.PSSetShaderResources(e._active, 1, &e.resource);
-        // }
-
-        if (states.length != 0)
+        foreach (DX11Texture e; currTex)
         {
-            context.PSSetSamplers(0, cast(UINT) states.length, &states[0]);
-            context.PSSetShaderResources(0, cast(UINT) views.length, &views[0]);
+            context.PSSetSamplers(e._active, 1, &e.sampler);
+            context.PSSetShaderResources(e._active, 1, &e.resource);
         }
+
+        // if (states.length != 0)
+        // {
+        //     context.PSSetSamplers(0, cast(UINT) states.length, &states[0]);
+        //     context.PSSetShaderResources(0, cast(UINT) views.length, &views[0]);
+        // }
 
         context.DrawIndexed(icount, 0, 0);
 

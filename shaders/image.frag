@@ -6,7 +6,7 @@
 layout (location = 0) in vec2 texCoord;
 
 // Соглашение о стандартныйх fragment данных.
-layout (binding = 0) uniform Color
+layout (binding = 1) uniform Color
 {
 	vec4 color;
 	vec2 size;

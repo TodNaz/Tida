@@ -47,27 +47,10 @@ int main(string[] args)
 
     render.background(rgb(128, 128, 128));
 
-    Image image = new Image().load("icon.png");
-    image.toTexture(render);
-
-    auto arrayBuffer = render.api.createBuffer(BufferType.array);
-    arrayBuffer.bindData([
-        0f, 0f,          0f, 0f,
-        640, 0f,      1f, 0f,
-        640, 480, 1f, 1f,
-        0f, 480,     0f, 1f
-    ]);
-
-    auto elementBuffer = render.api.createBuffer(BufferType.element);
-    elementBuffer.bindData([0, 1, 2, 0, 2, 3]);
-
-    auto vertexInfo = render.api.createVertexInfo();
-    vertexInfo.bindBuffer(arrayBuffer);
-    vertexInfo.bindBuffer(elementBuffer);
-    vertexInfo.vertexAttribPointer([
-        AttribPointerInfo(0, 2, TypeBind.Float, 4 * float.sizeof, 0),
-        AttribPointerInfo(1, 2, TypeBind.Float, 4 * float.sizeof, 2 * float.sizeof)
-    ]);
+    import std.stdio;
+    writeln(
+        render.api.rendererInfo()
+    );
 
     bool isQuit = false;
     while (!isQuit)
@@ -80,34 +63,10 @@ int main(string[] args)
 
         render.clear();
 
-
         render.line([vecf(0, 0), vecf(320, 240)], rgb(255, 0, 0));
         render.line([vecf(320, 240), vecf(640, 0)], rgb(255, 255, 0));
         render.line([vecf(320, 240), vecf(0, 480)], rgb(255, 0, 255));
         render.line([vecf(320, 240), vecf(640, 480)], rgb(0, 255, 0));
-
-        IShaderPipeline shader = Image.initShader(render);
-
-        render.api.bindProgram(shader);
-        render.api.bindVertexInfo(vertexInfo);
-
-        uniformBuilder(
-            shader.vertexProgram(),
-            0,
-            (cast(Render) render).projection,
-            render.currentModelMatrix()
-        );
-
-        uniformBuilder(
-            shader.fragmentProgram(),
-            0,
-            cast(float[4]) [1.0f, 1.0f, 1.0f, 1.0f],
-            cast(float[2]) [640, 480]
-        );
-
-        render.api.begin();
-
-        render.api.drawIndexed(ModeDraw.triangle, 6);
 
         render.drawning();
     }

@@ -380,12 +380,10 @@ struct UBInfo
 	size_t sizeBuffer() @safe
 	{
 		size_t result;
-		foreach (e; ranges) {
+		size_t offset = 0;
+		foreach (i, e; ranges) {
 			result += e.range;
-			if (e.range % 16 != 0)
-			{
-				result += 16 - e.range;
-			}
+			offset += e.offset;
 		}
 
 		return result;
