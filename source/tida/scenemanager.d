@@ -2504,7 +2504,7 @@ export:
         _current = scene;
         _thereGoto = false;
 
-        loader.collect();
+        //loader.collect();
     }
 
     /++

@@ -34,6 +34,8 @@ import tida.graphics.gapi;
 import io = std.stdio;
 import file = std.file;
 
+import tida.graphics.shader;
+
 version(unittest) {} else
 int main(string[] args)
 {
@@ -46,11 +48,6 @@ int main(string[] args)
     Render render = new Render(window);
 
     render.background(rgb(128, 128, 128));
-
-    import std.stdio;
-    writeln(
-        render.api.rendererInfo()
-    );
 
     bool isQuit = false;
     while (!isQuit)

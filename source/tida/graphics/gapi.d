@@ -379,6 +379,8 @@ interface IShaderProgram
 
     size_t getUniformBlocks() @safe;
 
+    bool hasUniformBinding(uint id) @safe;
+
     void setUniformData(uint, void[]) @safe;
 
     void setUniformBuffer(uint, IBuffer) @safe;
@@ -421,6 +423,12 @@ template isVector(T)
     enum isVector = isStaticArray!(T) && isScalar!(ForeachType!(T));
 }
 
+enum AlignRule
+{
+    std140,
+    dx11
+}
+
 template std140align(R)
 {
     import std.traits : ForeachType, Unconst;
@@ -448,26 +456,60 @@ template std140align(R)
     }
 }
 
-template std140struct(T...)
+template dx11align(R)
+{
+    import std.traits : ForeachType, Unconst;
+
+    alias T = Unconst!(R);
+
+    static if (isScalar!T)
+    {
+        enum dx11align = "4";
+    } else
+    static if (isVector!T)
+    {
+        static if (T.length == 1)
+            enum dx11align = "4";
+        else
+        static if (T.length == 2)
+            enum dx11align = "4";
+        else
+        static if (T.length == 3 || T.length == 4)
+            enum dx11align = "8";
+    } else
+    static if (isMatrix!T)
+    {
+        enum dx11align = dx11align!(ForeachType!T);
+    }
+}
+
+template alignStruct(AlignRule rule, T...)
 {
     import std.typecons, std.conv, std.traits;
-    struct std140struct
+
+    static if (rule == AlignRule.std140)
+        alias alignFunc = std140align;
+    else
+    static if (rule == AlignRule.dx11)
+        alias alignFunc = dx11align;
+
+    struct alignStruct
     {
     //align(16):
         static foreach (i, e; T)
         {
-            mixin("align(" ~ std140align!(e) ~ ")" ~
-            "std.traits.Unconst!e __std140var" 
+            mixin("align(" ~ alignFunc!(e) ~ ")" ~
+            "std.traits.Unconst!e __alignvar" 
             ~ to!string(i) ~ ";"
             );
         }
 
         static auto build(T args) @trusted
         {
-            std140struct upload;
+            alignStruct upload;
             static foreach (i, e; T)
             {
-                mixin("upload.__std140var" ~ to!string(i) ~ " = args[" ~ to!string(i) ~ "];");
+                mixin("upload.__alignvar" ~ to!string(i) ~ " = args[" ~ to!string(i) ~ "];");
             }
 
             return upload;
@@ -475,29 +517,68 @@ template std140struct(T...)
     }
 }
 
-void[] uniformBuilder(T...)(IShaderProgram program, uint id, T args) @trusted
+void __uniformBuilder_std140(T...)(IShaderProgram program, uint id, T args) @trusted
 {
     import std.traits, std.conv;
 
-    if (program.getUniformBlocks() < id || program.getUniformBlocks() == 0)
-        return [];
-
-    std140struct!(T) aligned = std140struct!(T).build(args);
+    alignStruct!(AlignRule.std140, T) aligned = alignStruct!(AlignRule.std140, T).build(args);
 
     void[] flushData;
     IBuffer buffer = program.getUniformBuffer(id);
     if (buffer is null)
         throw new Exception("Cannot get buffer from id " ~ to!string(id));
 
-    if (buffer.getSize() == 0)
-        buffer.allocate(aligned.sizeof);
+    if (buffer.getSize() < aligned.sizeof)
+    {
+        import io = std.stdio;
+        io.writeln(buffer.getSize(), " : ", aligned.sizeof);
+        throw new Exception("Cannot update buffer, if uniform length not equal buffer size");
+    }
+
+    flushData = new ubyte[](buffer.getSize());
+
+    flushData[0 .. aligned.sizeof] = cast(void[]) ((cast(void*) &aligned)[0 .. aligned.sizeof]);
+
+    buffer.bindData(flushData);
+}
+
+void __uniformBuilder_dx11(T...)(IShaderProgram program, uint id, T args) @trusted
+{
+    import std.traits, std.conv;
+
+    alignStruct!(AlignRule.dx11, T) aligned = alignStruct!(AlignRule.dx11, T).build(args);
+
+    void[] flushData;
+    IBuffer buffer = program.getUniformBuffer(id);
+    if (buffer is null)
+        throw new Exception("Cannot get buffer from id " ~ to!string(id));
+
+    if (buffer.getSize() < aligned.sizeof)
+    {
+        import io = std.stdio;
+        io.writeln(buffer.getSize(), " : ", aligned.sizeof);
+        throw new Exception("Cannot update buffer, if uniform length not equal buffer size");
+    }
 
     flushData = new ubyte[](aligned.sizeof);
 
     flushData[] = cast(void[]) ((cast(void*) &aligned)[0 .. flushData.length]);
 
     buffer.bindData(flushData);
-    return flushData;
+}
+
+void uniformBuilder(T...)(IShaderProgram program, uint id, T args) @trusted
+{
+    import std.traits, std.conv;
+
+    if (!program.hasUniformBinding(id))
+        return;
+
+    if (program.getUniformBufferAlign() == 0)
+        __uniformBuilder_std140!T(program, id, args);
+    else
+    if (program.getUniformBufferAlign() == 1)
+        __uniformBuilder_std140!T(program, id, args);
 }
 
 interface IShaderPipeline

@@ -1,0 +1,18 @@
+{
+	"dependencies": {
+		"commandr": "~>0.2.0",
+		"tida": {
+			"path": "../../"
+		}
+	},
+	"name": "tsc",
+	"configurations": [
+		{
+			"name": "executable",
+			"targetType": "executable"
+		}
+	],
+	"sourceFiles": [
+		"tsc.d"
+	]
+}

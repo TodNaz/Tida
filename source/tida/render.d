@@ -359,9 +359,9 @@ class Render : IRenderer
             tida.shape,
             tida.meshgen;
 
-    enum vertexShaderSource = import("color.vert.spv");
+    enum vertexShaderSource = import("color.vert.tso");
 
-    enum fragmentShaderSource = import("color.frag.spv");
+    enum fragmentShaderSource = import("color.frag.tso");
 
     IGraphManip gapi;
     IShaderPipeline defaultShader;
@@ -436,7 +436,7 @@ class Render : IRenderer
 
         uniformBuilder(
             _currentShader.fragmentProgram(),
-            0,
+            1,
             cc,
             cast(float[2]) size[0 .. 2]
         );

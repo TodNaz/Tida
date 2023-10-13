@@ -287,6 +287,8 @@ struct spvc_reflected_resource
 	const char *name;
 }
 
+alias spvc_type = void*;
+
 extern(C)
 {
     alias spvc_context_create_f = int function(spvc_context*);
@@ -304,6 +306,11 @@ extern(C)
 	alias spvc_compiler_create_shader_resources_f = int function(spvc_compiler, spvc_resources*);
 	alias spvc_resources_get_resource_list_for_type_f = int function(spvc_resources, spvc_resource_type, spvc_reflected_resource**, size_t*);
 	alias spvc_compiler_get_decorationf = uint function(spvc_compiler, int, SpvDecoration);
+	alias spvc_compiler_get_declared_struct_sizef = int function(spvc_compiler, spvc_type, size_t* size);
+	alias spvc_compiler_get_type_handlef = spvc_type function(spvc_compiler, int type_id);
+	alias spvc_type_get_num_member_typesf = uint function(spvc_type);
+	alias spvc_compiler_get_declared_struct_member_sizef = int function(spvc_compiler, spvc_type, uint, size_t* size);
+	alias spvc_compiler_type_struct_member_offsetf = int function(spvc_compiler, spvc_type, uint, size_t* offset);
 }
 
 __gshared
@@ -322,6 +329,11 @@ __gshared
 	spvc_compiler_create_shader_resources_f spvc_compiler_create_shader_resources;
 	spvc_resources_get_resource_list_for_type_f spvc_resources_get_resource_list_for_type;
 	spvc_compiler_get_decorationf spvc_compiler_get_decoration;
+	spvc_compiler_get_declared_struct_sizef spvc_compiler_get_declared_struct_size;
+	spvc_compiler_get_type_handlef spvc_compiler_get_type_handle;
+	spvc_compiler_type_struct_member_offsetf spvc_compiler_type_struct_member_offset;
+	spvc_type_get_num_member_typesf spvc_type_get_num_member_types;
+	spvc_compiler_get_declared_struct_member_sizef spvc_compiler_get_declared_struct_member_size;
 }
 
 enum ShaderSourceType
@@ -372,27 +384,57 @@ void spirvLoad()
 	lib.bindSymbol(cast(void**) &spvc_compiler_create_shader_resources, "spvc_compiler_create_shader_resources");
 	lib.bindSymbol(cast(void**) &spvc_resources_get_resource_list_for_type, "spvc_resources_get_resource_list_for_type");
 	lib.bindSymbol(cast(void**) &spvc_compiler_get_decoration, "spvc_compiler_get_decoration");
-
+	lib.bindSymbol(cast(void**) &spvc_compiler_get_declared_struct_size, "spvc_compiler_get_declared_struct_size");
+	lib.bindSymbol(cast(void**) &spvc_compiler_get_type_handle, "spvc_compiler_get_type_handle");
+	lib.bindSymbol(cast(void**) &spvc_type_get_num_member_types, "spvc_type_get_num_member_types");
+	lib.bindSymbol(cast(void**) &spvc_compiler_type_struct_member_offset, "spvc_compiler_type_struct_member_offset");
+	lib.bindSymbol(cast(void**) &spvc_compiler_get_declared_struct_member_size, "spvc_compiler_get_declared_struct_member_size");
 }
 
 struct UBInfo
 {
 	uint id;
 	spvc_buffer_range[] ranges;
+	size_t sizeBuffer;
 
-	size_t sizeBuffer() @safe
-	{
-		size_t result;
-		size_t offset = 0;
-		foreach (i, e; ranges)
-		{
-			immutable aligned = e.offset == 0 ? 0 : 0;
-			result += e.range;
-			offset += e.offset;
-		}
+	// size_t sizeBuffer() @safe
+	// {
+	// 	size_t result = 0;
+	// 	size_t maxOffset = 0;
 
-		return result;
-	}
+	// 	if (ranges.length == 1)
+	// 	{
+	// 		result = ranges[0].range;
+
+	// 		if (result % 16 != 0)
+	// 		{
+	// 			immutable rt = result / 16;
+	// 			return result + ((rt + 1) * 16 - result);
+	// 		}
+	// 		else
+	// 			return result;
+	// 	}		
+
+	// 	foreach (e; ranges)
+	// 	{
+	// 		import std.stdio;
+	// 		writeln(e);
+	// 		result += e.range;
+	// 		if (e.offset > maxOffset)
+	// 			maxOffset = e.offset - e.range;
+	// 	}
+
+	// 	return result + maxOffset;
+	// }
+}
+
+size_t roundUp(
+	size_t value,
+	size_t multiple
+)
+{
+	assert(multiple && ((multiple & (multiple - 1)) == 0));
+	return (value + multiple - 1) & ~(multiple - 1);
 }
 
 class ShaderCompiler
@@ -420,46 +462,9 @@ class ShaderCompiler
 
 	UBInfo[] ubos;
 
-	void uboSetup(void[] data) @trusted
-	{
-		if (spvc_context_parse_spirv(ctx, cast(uint*) data.ptr, data.length / uint.sizeof, &pir) != 0)
-        {
-            throw new Exception("[SPIRV-CROSS] Error parse SPIR-V code!");
-        }
-
-		if (spvc_context_create_compiler(ctx, srcType.backengFromType, pir, spvc_capture_mode.SPVC_CAPTURE_MODE_COPY, &compiler) != 0)
-        {
-            throw new Exception("[SPIRV-CROSS] Error create compiler!");
-        }
-
-		spvc_resources _rs;
-		spvc_reflected_resource* rs;
-		size_t numRS;
-		if (spvc_compiler_create_shader_resources(compiler, &_rs))
-		{
-			throw new Exception("Not create shader resources!");
-		}
-
-		spvc_resources_get_resource_list_for_type(_rs, spvc_resource_type.SPVC_RESOURCE_TYPE_UNIFORM_BUFFER, &rs, &numRS);
-		if (numRS != 0)
-		{
-			foreach (e; rs[0 .. numRS])
-			{
-				UBInfo info;
-				info.id = e.id;
-
-				spvc_buffer_range* ranges;
-				size_t numRanges;
-				spvc_compiler_get_active_buffer_ranges(compiler, e.id, &ranges, &numRanges);
-				info.ranges = ranges[0 .. numRanges];
-
-				ubos ~= info;
-			}
-		}
-	}
-
     string compile(void[] data)
     {
+		import std.algorithm : reverse;
         import std.conv : to;
 
         if (spvc_context_parse_spirv(ctx, cast(uint*) data.ptr, data.length / uint.sizeof, &pir) != 0)
@@ -498,14 +503,50 @@ class ShaderCompiler
 			{
 				UBInfo info;
 
-				spvc_buffer_range* ranges;
-				size_t numRanges;
-				spvc_compiler_get_active_buffer_ranges(compiler, e.id, &ranges, &numRanges);
-				info.ranges = ranges[0 .. numRanges];
+				auto handle = spvc_compiler_get_type_handle(compiler, e.type_id);
+
+				spvc_buffer_range[] ranges;
+				uint numMembers = spvc_type_get_num_member_types(handle);
+				foreach (i; 0 .. numMembers)
+				{
+					spvc_buffer_range rr;
+					rr.index = i;
+					spvc_compiler_type_struct_member_offset(compiler, handle, i, &rr.offset);
+					spvc_compiler_get_declared_struct_member_size(compiler, handle, i, &rr.range);
+
+					ranges ~= rr;
+				}
+
+				for (size_t i = 0; i < numMembers - 1; ++i)
+				{
+					spvc_buffer_range* member = &ranges[i];
+					spvc_buffer_range* memberNext = &ranges[i + 1];
+
+					size_t paddingSize = memberNext.offset - member.offset;
+					if (member.range > paddingSize)
+						member.range = paddingSize;
+
+					info.sizeBuffer += member.range;
+				}
+
+				spvc_buffer_range* member = &ranges[$ - 1];
+				size_t paddingSize = roundUp(member.offset + member.range, uint.sizeof * 4) - member.offset;
+				if (member.range > paddingSize)
+					member.range = paddingSize;
+
+				if (member.range % 16 != 0)
+				{
+					immutable rt = member.range / 16;
+					member.range = member.range + ((rt + 1) * 16 - member.range);
+				}
+
+				info.sizeBuffer += member.range;
 
 				info.id = spvc_compiler_get_decoration(
 					compiler, e.id, SpvDecoration.SpvDecorationBinding
 				);
+
+				info.ranges = ranges;
 
 				ubos ~= info;
 			}

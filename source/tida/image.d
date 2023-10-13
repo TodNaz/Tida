@@ -329,8 +329,8 @@ export:
         texture.active(0);
     }
 
-    enum vertexShaderSource = import("image.vert.spv");
-    enum fragmentShaderSource = import("image.frag.spv");
+    enum vertexShaderSource = import("image.vert.tso");
+    enum fragmentShaderSource = import("image.frag.tso");
 
     static IShaderPipeline initShader(IRenderer render) @trusted
     {
@@ -384,7 +384,7 @@ export:
 
         uniformBuilder(
             shader.fragmentProgram(),
-            0,
+            1,
             cast(float[4]) [1.0f, 1.0f, 1.0f, 1.0f],
             cast(float[2]) [_width, _height]
         );
@@ -446,7 +446,7 @@ export:
 
         uniformBuilder(
             shader.fragmentProgram(),
-            0,
+            1,
             cast(float[4]) [color.rf, color.gf, color.bf, color.af],
             (size.isVectorNaN!float ? cast(float[2]) [_width, _height] : cast(float[2]) [size.x, size.y])
         );

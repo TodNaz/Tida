@@ -795,6 +795,8 @@ override:
 
 class GLShaderManip : IShaderManip
 {
+    import tida.graphics.shader;
+
     StageType _stage;
     uint id;
 
@@ -823,6 +825,7 @@ class GLShaderManip : IShaderManip
     }
 
     bool memored = false;
+    UBInfo[] prepared;
 
     this(StageType stage, Logger logger) @trusted
     {
@@ -834,6 +837,85 @@ class GLShaderManip : IShaderManip
     ~this() @trusted
     {
         glDeleteShader(id);
+    }
+
+    void tsoMemory(void[] adata)
+    {
+        ubyte[] data = cast(ubyte[]) adata;
+        import bm = std.bitmanip;
+
+        data = data[8 .. $];
+        size_t offset;
+        void[] spirv;
+
+        uint spvs, dxis, unis;
+        ubyte[] cdat;
+
+        cdat = data[offset .. offset += uint.sizeof];
+        spvs = bm.read!uint(cdat);
+        cdat = data[offset .. offset += uint.sizeof];
+        dxis = bm.read!uint(cdat);
+        cdat = data[offset .. offset += uint.sizeof];
+        unis = bm.read!uint(cdat);
+
+        spirv = data[offset .. offset += spvs];
+        offset += dxis;
+        immutable range = offset + unis;
+        for (; offset < range;)
+        {
+            char[] type = cast(char[]) data[offset .. offset += 3];
+            if (type == "UNI")
+            {
+                ushort binding;
+                uint size;
+
+                cdat = data[offset .. offset += ushort.sizeof];
+                binding = bm.read!ushort(cdat);
+                cdat = data[offset .. offset += uint.sizeof];
+                size = bm.read!uint(cdat);
+
+                prepared ~= UBInfo(binding, [], size);
+            } else
+            if (type == "SMP")
+            {
+                offset += 3;
+            }
+        }
+
+        if (!glSpirvSupport())
+        {
+            spvMemory(spirv);
+            return;
+        }
+
+        memored = true;
+
+        glShaderBinary(1, &id, GL_SHADER_BINARY_FORMAT_SPIR_V, spirv.ptr, cast(uint) spirv.length);
+        
+        if (glSpecializeShader is null)
+            throw new Exception("[GL] Specialize shader is not supported");
+
+        glSpecializeShader(id, "main", 0, null, null);
+
+        char[] error;
+        int result;
+        int lenLog;
+
+        glGetShaderiv(id, GL_COMPILE_STATUS, &result);
+        if (!result)
+        {
+            import std.conv : to;
+
+            debug logger.critical("Shader is not a compile!");
+
+            glGetShaderiv(id, GL_INFO_LOG_LENGTH, &lenLog);
+            error = new char[](lenLog);
+            glGetShaderInfoLog(id, lenLog, null, error.ptr);
+
+            debug logger.critical("Shader log error:\n", error.to!string.formatError);
+
+            throw new Exception("Shader compile error:\n" ~ error.to!string.formatError);
+        }
     }
 
     void spvMemory(void[] data)
@@ -870,6 +952,13 @@ override:
     void loadFromMemory(void[] memory) @trusted
     {
         import std.conv : to;
+
+        string signature = cast(string) memory[0 .. 8];
+        if (signature == ".TIDASO\0")
+        {
+            tsoMemory(memory);
+            return;
+        }
 
         if (!glSpirvSupport())
         {
@@ -941,6 +1030,23 @@ class GLShaderProgram : IShaderProgram
         this.logger = logger;
     }
 
+    GLShaderManip mainShader() @safe
+    {
+        if (vertex !is null) return vertex; else
+        if (fragment !is null) return fragment; else
+        if (compute !is null) return compute; else
+        return geometry;
+    }
+
+    ref GLBuffer fromBind(uint id) @safe
+    {
+        foreach (ref MemoryUniform e; ublocks) {
+            if (e.id == id) return e.buffer;
+        }
+
+        assert(0, "Cannot return non-exist binding!");
+    }
+
 override:
     void attach(IShaderManip shader) @trusted
     {
@@ -984,6 +1090,24 @@ override:
             throw new Exception(msg);
         }
 
+        // if (mainShader().prepared.length != 0)
+        // {
+        //     for (size_t i = 0; i < mainShader().prepared.length; i++)
+        //     {
+        //         uint usize = cast(uint) mainShader().prepared[i].sizeBuffer;
+
+        //         MemoryUniform mu;
+        //         mu.id = mainShader().prepared[i].id;
+        //         mu.buffer = new GLBuffer(BufferType.uniform);
+        //         mu.buffer.dataUsage(BuffUsageType.dynamicData);
+        //         mu.buffer.allocate(usize);
+        //         mu.size = usize;
+
+        //         ublocks ~= mu;
+        //     }
+        //     return;
+        // }
+
         int uniformBlocks;
         glGetProgramiv(id, GL_ACTIVE_UNIFORM_BLOCKS, &uniformBlocks);
         foreach (i; 0 .. uniformBlocks)
@@ -996,13 +1120,27 @@ override:
             glGetActiveUniformBlockiv(id, i, GL_UNIFORM_BLOCK_BINDING, &block);
 
             int usize;
+            glGetActiveUniformBlockiv(id, i, GL_UNIFORM_BLOCK_DATA_SIZE, &usize);
+
             MemoryUniform mu;
             mu.id = block;
             mu.buffer = new GLBuffer(BufferType.uniform);
             mu.buffer.dataUsage(BuffUsageType.dynamicData);
+            mu.buffer.allocate(usize);
+            mu.size = usize;
 
             ublocks ~= mu;
         }
+    }
+
+    bool hasUniformBinding(uint id) @safe
+    {
+        foreach (e; ublocks)
+        {
+            if (e.id == id) return true;
+        }
+
+        return false;
     }
 
     size_t getUniformBlocks() @safe
@@ -1012,22 +1150,22 @@ override:
 
     void setUniformData(uint id, void[] data) @safe
     {
-        ublocks[id].buffer.bindData(data);
+        fromBind(id).bindData(data);
     }
 
     void setUniformBuffer(uint id, IBuffer buffer) @safe
     {
-        ublocks[id].buffer = cast(GLBuffer) buffer;
+        fromBind(id) = cast(GLBuffer) buffer;
     }
 
     IBuffer getUniformBuffer(uint id) @safe
     {
-        return cast(IBuffer) ublocks[id].buffer;
+        return fromBind(id);
     }
 
     uint getUniformBufferAlign() @trusted
     {
-        return 16;
+        return 0;
     }
 }
 

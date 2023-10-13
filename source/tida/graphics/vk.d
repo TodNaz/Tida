@@ -291,17 +291,22 @@ final class VkShaderProgram : IShaderProgram
             throw new Exception("[VK] Shader Program link error!");
 
         ShaderCompiler sc = new ShaderCompiler(ShaderSourceType.GLSL);
-        sc.uboSetup(main().code);
+        //sc.uboSetup(main().code);
 
         this.ubos = sc.ubos;
 
         foreach (e; this.ubos)
         {
             VkGBuffer gbuffer = new VkGBuffer(gapi, BufferType.uniform);
-            gbuffer.allocate(e.sizeBuffer());
+            gbuffer.allocate(e.sizeBuffer);
 
             buffers ~= gbuffer;
         }
+    }
+
+    bool hasUniformBinding(uint id) @safe
+    {
+        return false;
     }
 
     size_t getUniformBlocks() @safe

@@ -1,5 +1,6 @@
 module tida.graphics.dx11;
  import directx.d3d11;
+ import tida.graphics.shader;
 
 version(DX11Graph):
 import directx.d3d11;
@@ -17,6 +18,8 @@ import std.encoding;
 
 class DX11Shader : IShaderManip
 {
+    import tida.graphics.gapi;
+
     ID3D10Blob code;
     ID3D11Device device;
     ID3D11DeviceContext ctx;
@@ -77,6 +80,112 @@ class DX11Shader : IShaderManip
         this.ctx = ctx;
     }
 
+    UBInfo[] prepared;
+
+    void tsoMemory(void[] adata)
+    {
+        ubyte[] data = cast(ubyte[]) adata;
+        import bm = std.bitmanip;
+
+        data = data[8 .. $];
+        size_t offset;
+        void[] dxbc;
+
+        uint spvs, dxis, unis;
+        ubyte[] cdat;
+
+        cdat = data[offset .. offset += uint.sizeof];
+        spvs = bm.read!uint(cdat);
+        cdat = data[offset .. offset += uint.sizeof];
+        dxis = bm.read!uint(cdat);
+        cdat = data[offset .. offset += uint.sizeof];
+        unis = bm.read!uint(cdat);
+
+        offset += spvs;
+        dxbc = data[offset .. offset += dxis];
+        immutable range = offset + unis;
+        for (; offset < range;)
+        {
+            char[] type = cast(char[]) data[offset .. offset += 3];
+            if (type == "UNI")
+            {
+                ushort binding;
+                uint size;
+
+                cdat = data[offset .. offset += ushort.sizeof];
+                binding = bm.read!ushort(cdat);
+                cdat = data[offset .. offset += uint.sizeof];
+                size = bm.read!uint(cdat);
+
+                prepared ~= UBInfo(binding, [], size);
+            } else
+            if (type == "SMP")
+            {
+                offset += 3;
+            }
+        }
+
+        HRESULT csc;
+        D3DCreateBlob(
+            dxbc.length, &code
+        );
+        code.GetBufferPointer()[0 .. dxbc.length] = dxbc[];
+        final switch (_stage)
+        {
+            case StageType.vertex:
+                csc = device.CreateVertexShader(
+                    code.GetBufferPointer(),
+                    code.GetBufferSize(),
+                    null,
+                    &object._vertex
+                );
+                break;
+            case StageType.fragment:
+                csc = device.CreatePixelShader(
+                    code.GetBufferPointer(),
+                    code.GetBufferSize(),
+                    null,
+                    &object._pixel
+                );
+                break;
+            case StageType.geometry:
+                csc = device.CreateGeometryShader(
+                    code.GetBufferPointer(),
+                    code.GetBufferSize(),
+                    null,
+                    &object._geom
+                );
+                break;
+            case StageType.compute:
+                csc = device.CreateComputeShader(
+                    code.GetBufferPointer(),
+                    code.GetBufferSize(),
+                    null,
+                    &object._comp
+                );
+                break;
+        }
+        if (FAILED(csc))
+        {
+            debug outputCode();
+            throw new Exception("Cannot create shader!");
+        }
+
+        for (size_t i = 0; i < prepared.length; i++)
+        {
+            auto e = prepared[i];
+
+            Memory mem;
+            DX11Buffer buffer = new DX11Buffer(BufferType.uniform, device, ctx);
+            buffer.allocate(e.sizeBuffer);
+
+            mem.buffer = buffer;
+            mem.ub = e;
+
+            memories ~= mem;
+        }
+    }
+
     /// Loading a shader from its source code.
     void loadFromSource(string code) @safe
     {
@@ -115,6 +224,13 @@ class DX11Shader : IShaderManip
     {
         import std.conv, std.string;
 
+        string signature = cast(string) b[0 .. 8];
+        if (signature == ".TIDASO\0")
+        {
+            tsoMemory(b);
+            return;
+        }
+
         ShaderCompiler compiler = new ShaderCompiler(ShaderSourceType.HLSL);
         string src = compiler.compile(b);
         debug
@@ -126,6 +242,7 @@ class DX11Shader : IShaderManip
         {
             Memory mem;
             DX11Buffer buffer = new DX11Buffer(BufferType.uniform, device, ctx);
+            buffer.allocate(e.sizeBuffer);
 
             mem.buffer = buffer;
             mem.ub = e;
@@ -246,6 +363,25 @@ class DX11ShaderProgram : IShaderProgram
         isLink = true;
     }
 
+    ref DX11Buffer fromBind(uint id) @safe
+    {
+        foreach (ref DX11Shader.Memory e; mainShader().memories) {
+            if (e.ub.id == id) return e.buffer;
+        }
+
+        assert(0, "Cannot return non-exist binding!");
+    }
+
+    bool hasUniformBinding(uint id) @safe
+    {
+        foreach (e; mainShader().memories)
+        {
+            if (e.ub.id == id) return true;
+        }
+
+        return false;
+    }
+
     size_t getUniformBlocks() @safe
     {
         return mainShader().memories.length;
@@ -253,22 +389,22 @@ class DX11ShaderProgram : IShaderProgram
 
     void setUniformData(uint id, void[] data) @safe
     {
-        mainShader().memories[id].buffer.bindData(data);
+        fromBind(id).bindData(data);
     }
 
     void setUniformBuffer(uint id, IBuffer buffer) @safe
     {
-        mainShader().memories[id].buffer = cast(DX11Buffer) buffer;
+        fromBind(id) = cast(DX11Buffer) buffer;
     }
 
     IBuffer getUniformBuffer(uint id) @safe
     {
-        return mainShader().memories[id].buffer;
+        return fromBind(id);
     }
 
     uint getUniformBufferAlign() @safe
     {
-        return 16;
+        return 1;
     }
 }
 
@@ -559,8 +695,6 @@ class DX11VertexInfo : IVertexInfo
             throw new Exception("Pipeline is null!");
         if (pipeline._vertex is null)
             throw new Exception("Pipeline vertex shader is null!");
-        if (pipeline._vertex.vertex.code is null)
-            throw new Exception("Pipeline vertex code shader is null!");
 
         immutable ulong __id = cast(ulong) (cast(void*) pipeline._vertex.vertex.code);
 
@@ -858,7 +992,7 @@ class DX11Texture : ITexture
         descript.Width = width;
         descript.Height = height;
         descript.Format = format(storage);
-        descript.Usage = D3D11_USAGE_DEFAULT;
+        descript.Usage = 0;
         descript.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
         descript.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         descript.MipLevels = 1;
