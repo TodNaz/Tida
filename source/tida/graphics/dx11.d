@@ -11,10 +11,57 @@ import tida.color;
 
 import directx.d3dx11;
 import directx.dxgi;
+import directx.dxgi1_5;
 import directx.d3dcompiler;
 import core.sys.windows.iphlpapi;
 import tida.graphics.shader;
 import std.encoding;
+
+class gapi_BLOB : ID3D10Blob
+{
+extern(Windows):
+    void[] data;
+
+    LPVOID GetBufferPointer()
+    {
+        return data.ptr;
+    }
+	
+	SIZE_T GetBufferSize()
+    {
+        return cast(SIZE_T) data.length;
+    }
+
+    HRESULT QueryInterface(IID* riid, void** pvObject)
+    {
+        return ERROR_NOT_READY;
+    }
+
+    ULONG AddRef()
+    {
+        return 0;
+    }
+
+    ULONG Release()
+    {
+        destroy(data);
+
+        return 0;
+    }
+}
+
+HRESULT gapi_D3DCreateBlob(
+    SIZE_T Size,
+	ID3DBlob* ppBlob
+)
+{
+    gapi_BLOB sb = new gapi_BLOB();
+    sb.data = cast(void[]) new ubyte[](Size);
+
+    *ppBlob = cast(ID3DBlob) sb;
+
+    return 0;
+}
 
 class DX11Shader : IShaderManip
 {
@@ -126,7 +173,7 @@ class DX11Shader : IShaderManip
         }
 
         HRESULT csc;
-        D3DCreateBlob(
+        gapi_D3DCreateBlob(
             dxbc.length, &code
         );
         code.GetBufferPointer()[0 .. dxbc.length] = dxbc[];
@@ -253,9 +300,9 @@ class DX11Shader : IShaderManip
         ID3D10Blob error;
         HRESULT rcode;
 
-        rcode = D3DCompile(
-            &src[0], src.length, null, null, null, "main", targetFrom(_stage).toStringz, D3DCOMPILE_ENABLE_STRICTNESS, 0, &code, &error
-        );
+        // rcode = D3DCompile(
+        //     &src[0], src.length, null, null, null, "main", targetFrom(_stage).toStringz, D3DCOMPILE_ENABLE_STRICTNESS, 0, &code, &error
+        // );
 
         if (FAILED(rcode) || error)
         {
@@ -951,7 +998,7 @@ class DX11Texture : ITexture
         descript.Format = format(storage);
         descript.Usage = D3D11_USAGE_DYNAMIC;
         descript.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        descript.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        descript.CPUAccessFlags = 0;
         descript.MipLevels = 1;
         descript.ArraySize = 1;
 
@@ -994,7 +1041,7 @@ class DX11Texture : ITexture
         descript.Format = format(storage);
         descript.Usage = 0;
         descript.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-        descript.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        descript.CPUAccessFlags = 0;
         descript.MipLevels = 1;
         descript.ArraySize = 1;
 
@@ -1237,21 +1284,20 @@ class DX11Framebuffer : IFrameBuffer
 class DX11GraphManip : IGraphManip
 {
     // "d3dcompiler", "d3d11", "dxgi"
-    pragma(lib, "d3d11");
-    pragma(lib, "dxgi");
-    pragma(lib, "d3dcompiler");
+    //pragma(lib, "d3dcompiler");
 
     private
     {
-        IDXGIFactory factor;
-        IDXGIAdapter adapter;
+        IDXGIFactory2 factor;
+        IDXGIAdapter1 adapter;
         ID3D11Device device;
-        IDXGISwapChain swapChain;
+        IDXGISwapChain1 swapChain;
         D3D_FEATURE_LEVEL level;
         ID3D11DeviceContext context;
         ID3D11RasterizerState rstate;
 
         ID3D11Texture2D backBuffer;
+        DX11Framebuffer _smainTarget;
         DX11Framebuffer mainTarget;
         DX11Framebuffer currentTarget;
         Color!ubyte clr;
@@ -1349,8 +1395,11 @@ override:
     ///     attribs = Graphics attributes.
     void createAndBindSurface(Window window, GraphicsAttributes attribs) @trusted
     {
-        immutable   w = window.width,
-                    h = window.height;
+        import tida.runtime;
+
+        auto size = runtime.monitorSize;
+        immutable   w = size[0],
+                    h = size[1];
 
         this.window = window;
 
@@ -1382,62 +1431,107 @@ override:
             }
         }
 
-        CreateDXGIFactory(&uuidof!(IDXGIFactory), &factor);
-        
-        if (factor.EnumAdapters(0, &adapter) == DXGI_ERROR_NOT_FOUND)
-        {
-            throw new Exception("[D3DX11] Not enum first adapter!");
-        }
-
-        DXGI_SWAP_CHAIN_DESC sd;
-        sd.BufferCount = 1;
-        sd.BufferDesc.Width = w;
-        sd.BufferDesc.Height = h;
-        sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        sd.BufferDesc.RefreshRate.Numerator = 60;
-        sd.BufferDesc.RefreshRate.Denominator = 1;
-        sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        sd.OutputWindow = windowHandle;
-        sd.SampleDesc.Count = 1;
-        sd.SampleDesc.Quality = 0;
-        sd.Windowed = true;
-
-        D3D_FEATURE_LEVEL[] featureLevels =
-        [
-            D3D_FEATURE_LEVEL_11_0,
-            D3D_FEATURE_LEVEL_10_1,
-            D3D_FEATURE_LEVEL_10_0
-        ];
-        immutable numFeatureLevels = featureLevels.length;
-
-        D3D_DRIVER_TYPE[] drivers = [
-            D3D_DRIVER_TYPE_HARDWARE,
-            D3D_DRIVER_TYPE_WARP,
-            D3D_DRIVER_TYPE_REFERENCE
-        ];
         HRESULT code;
+        HMODULE dxgi = LoadLibrary("dxgi.dll");
+        assert(dxgi, "Не удалось загрузить DXGI модулЬ! Установите драйвера на вашу видеокарту.");
 
-        UINT flags;
+        CreateDXGIFactory2 = cast(typeof(CreateDXGIFactory2)) GetProcAddress(dxgi, "CreateDXGIFactory2");
+        assert(CreateDXGIFactory2, "Не найдена функция `CreateDXGIFactory2` в dxgi.dll!");
+
+        HMODULE d3dlib = LoadLibrary("d3d11.dll");
+        assert(d3dlib);
+
+        PFN_D3D11_CREATE_DEVICE dcd = cast(PFN_D3D11_CREATE_DEVICE) GetProcAddress(d3dlib, "D3D11CreateDevice");
+        assert(dcd);
+
         debug
-        {
-            flags |= D3D11_CREATE_DEVICE_DEBUG;
-        }
-
-        foreach (ref e; drivers)
-        {
-            code = D3D11CreateDeviceAndSwapChain(
-                /+adapter+/ null, e, null, flags, &featureLevels[0], cast(UINT) numFeatureLevels, D3D11_SDK_VERSION, 
-                &sd, &swapChain, &device, &level, &context
+            code = CreateDXGIFactory2(
+                D3D11_CREATE_DEVICE_DEBUG, 
+                &uuidof!(IDXGIFactory2),
+                cast(void**) &factor
+            );
+        else
+            code = CreateDXGIFactory2(
+                0, 
+                &__uuidof!(IDXGIFactory2),
+                cast(void**) &factor
             );
 
-            if (SUCCEEDED (code))
-            {
-                break;
-            }
+        if (FAILED(code) || factor is null)
+        {
+            throw new Exception("[D3DX11] Cannot create factory!");
         }
+
+        code = factor.EnumAdapters1(0, &adapter);
+        if (FAILED(code) || adapter is null)
+        {
+            throw new Exception("[D3DX11] Cannot enumerate adapters!");
+        }
+
+        factor.MakeWindowAssociation(window.handle, DXGI_MWA_NO_WINDOW_CHANGES);
+
+        debug
+            immutable deviceFlags = D3D11_CREATE_DEVICE_DEBUG ;
+        else
+            immutable deviceFlags = 0;
+
+        D3D_FEATURE_LEVEL[2] levels = [
+            D3D_FEATURE_LEVEL_11_0,
+            D3D_FEATURE_LEVEL_11_1
+        ];
+
+        D3D_FEATURE_LEVEL levelInput;
+
+        code = dcd(
+            adapter, D3D_DRIVER_TYPE_UNKNOWN, null, deviceFlags, &levels[0], cast(UINT) levels.length,
+            D3D11_SDK_VERSION, &device, &levelInput, &context
+        );
         if (FAILED (code))
         {
             throw new Exception("[D3DX11] Error create device context!");
+        }
+
+        if (levelInput < 0xb000)
+        {
+            debug
+            {
+                import io = std.stdio;
+                io.writeln("Loaded dx11 level: ", level);
+            }
+            
+            throw new Exception("Cannot create d3d device, if level feature < 11_0");
+        }
+
+        DXGI_SWAP_CHAIN_DESC1 sd;
+        sd.BufferCount = 2;
+        sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        sd.Width = w;
+        sd.Height = h;
+        sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+        sd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        sd.Stereo = false;
+        sd.SampleDesc.Count = 1;
+        sd.Scaling = DXGI_SCALING_NONE;
+        sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        
+        DXGI_SWAP_CHAIN_FULLSCREEN_DESC fsd;
+        fsd.RefreshRate = DXGI_RATIONAL(60, 1);
+        fsd.Scaling = DXGI_SCALING_NONE;
+        fsd.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
+        fsd.Windowed = true;
+
+        code = factor.CreateSwapChainForHwnd(
+            device,
+            windowHandle,
+            cast(const) &sd,
+            cast(const) &fsd,
+            null,
+            &swapChain
+        );
+
+        if (FAILED (code))
+        {
+            throw new Exception("[D3DX11] Error create swapchain!");
         }
 
         ID3D11RenderTargetView _mainTarget;
@@ -1446,6 +1540,7 @@ override:
         device.CreateRenderTargetView(backBuffer, null, &_mainTarget);
 
         mainTarget = new DX11Framebuffer(device, context, _mainTarget);
+        _smainTarget = mainTarget;
 
         currentTarget = mainTarget;
 
@@ -1468,10 +1563,47 @@ override:
     }
 
     /// Updating the surface when the window is resized.
-    void update() @safe
+    void update() @trusted
     {
+        auto prev = currentTarget;
+        bool pvt = false;
 
+        if (prev is _smainTarget) pvt = true;
+
+        context.OMSetRenderTargets(0, null, null);
+
+        bool mtst = false;
+        if (_smainTarget is mainTarget)
+        {
+            destroy(_smainTarget);
+            mtst = true;
+        }
+
+        swapChain.ResizeBuffers(
+            1, cast(UINT) __viewport.Width, cast(UINT) __viewport.Height - window.windowBorderSize,
+            0, 0
+        );
+
+        ID3D11RenderTargetView _mainTarget;
+
+        swapChain.GetBuffer(0, &uuidof!(ID3D11Texture2D), cast(void**) &backBuffer);
+        device.CreateRenderTargetView(backBuffer, null, &_mainTarget);
+
+        _smainTarget = new DX11Framebuffer(device, context, _mainTarget);
+        if(mtst) mainTarget = _smainTarget;
+
+        if (!pvt)
+            context.OMSetRenderTargets(1, &prev.id, null);
+        else
+            context.OMSetRenderTargets(1, &_smainTarget.id, null);
+
+        // viewport(
+        //     __viewport.TopLeftX, __viewport.TopLeftY,
+        //     __viewport.Width, __viewport.Height - window.windowBorderSize
+        // );
     }
+
+    D3D11_VIEWPORT __viewport;
 
     /// Settings for visible borders on the surface.
     ///
@@ -1482,15 +1614,20 @@ override:
     ///     h = Viewport height.
     void viewport(float x, float y, float w, float h) @trusted
     {
-        D3D11_VIEWPORT viewport;
-        viewport.Width = w;
-        viewport.Height = h + window.windowBorderSize;
-        viewport.MinDepth = 0.0f;
-        viewport.MaxDepth = 1.0f;
-        viewport.TopLeftX = x;
-        viewport.TopLeftY = y;
+        __viewport.Width = w;
+        __viewport.Height = h + window.windowBorderSize / 1;
+        __viewport.MinDepth = 0.0f;
+        __viewport.MaxDepth = 1.0f;
+        __viewport.TopLeftX = x;
+        __viewport.TopLeftY = y;
 
-        context.RSSetViewports(1, &viewport);
+        // D3D11_RECT scissor;
+
+        // context.RSSetScissorRects(
+        //     1, 
+        // )
+
+        context.RSSetViewports(1, &__viewport);
     }
 
     /// Color mixing options.
@@ -1695,8 +1832,10 @@ __gapi_blend_create:
     /// Framebuffer output to the window surface.
     void drawning() @trusted
     {
-        context.OMSetRenderTargets(0, null, null);
+        auto prev = currentTarget;
+        context.OMSetRenderTargets(1, &_smainTarget.id, null);
         swapChain.Present(0, 0);
+        context.OMSetRenderTargets(1, &prev.id, null);
     }
 
     void setFrameBuffer(IFrameBuffer fb) @safe

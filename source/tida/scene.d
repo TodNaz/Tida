@@ -239,6 +239,7 @@ class Scene
     import tida.component;
     import tida.render;
     import tida.event;
+    import tida.image;
 
 package(tida):
     bool isInit = false;
@@ -247,6 +248,8 @@ protected:
     Instance[] instances;
     Instance[] erentInstances;
     Instance[][] bufferThread;
+
+    Image batched;
 
 export:
     Camera camera; /// Camera scene

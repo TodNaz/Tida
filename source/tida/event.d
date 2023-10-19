@@ -131,12 +131,31 @@ export interface IJoystick
     }
 }
 
+import std.range : InputRange;
+
 /++
 Interface for cross-platform listening for events from the window manager.
 +/
-export interface IEventHandler
+interface IEventHandler
 {
 @safe:
+    final IEventHandler front() @safe
+    {
+        return this;
+    }
+
+    final bool empty() @safe
+    {
+        return !this.hasEvent;
+    }
+
+    final void popFront() @safe
+    {
+        nextEvent();
+    }
+
+    bool hasEvent() @safe;
+
     /++
     Moves to the next event. If there are no more events, it returns false, 
     otherwise, it throws true and the programmer can safely check which event 
@@ -586,6 +605,12 @@ version(Posix)
             }
 
         override @trusted:
+            bool hasEvent() @safe
+            {
+                return  last !is null ||
+                        jevents.length != 0;
+            }
+
             /++
             Moves to the next event. If there are no more events, it returns false,
             otherwise, it throws true and the programmer can safely check which event
@@ -965,6 +990,12 @@ version(Posix)
             }
 
         override:
+            bool hasEvent()
+            {
+                return  XPending(runtime.display) != 0 ||
+                        jevents.length != 0;
+            }
+
             bool nextEvent()
             {
                 joyHandle();
@@ -1175,6 +1206,7 @@ export:
     
     JoystickEvent[] jEvents;
     JoystickEvent* currJEvent = null;
+    bool _isResize = false;
 
 @safe:
     this(tida.window.Window window)
@@ -1273,6 +1305,13 @@ export:
         }
     }
 
+    bool hasEvent()
+    {
+        return  jEvents.length != 0 ||
+                PeekMessage(&this.msg, this.window.handle, 0, 0, PM_NOREMOVE) != 0 ||
+                window.isResize;
+    }
+
     bool nextEvent()
     {
         TranslateMessage(&this.msg); 
@@ -1284,17 +1323,26 @@ export:
             if (jEvents.length == 0)
             {
                 currJEvent = null;
+                if (window.isResize)
+                {
+                    _isResize = true;
+                    window.isResize = false;
+                    return true;
+                }
+
                 return false;
             }
             else
             {
                 currJEvent = &jEvents[0];
                 jEvents = jEvents[1 .. $];
+                _isResize = false;
                 
                 return true;
             }
         } else
         {
+            _isResize = false;
             return true;
         }
     }
@@ -1360,16 +1408,19 @@ export:
 
     bool isResize()
     {
-        bool isResize = window.isResize;
-        window.isResize = false;
-
-        return isResize;
+        return _isResize;
     }
 
     uint[2] newSizeWindow()
     {
         RECT rect;
-        GetWindowRect((cast(Window) this.window).handle, &rect);
+        // DwmGetWindowAttribute((
+        //     cast(Window) this.window).handle, 
+        //     DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS, cast(LONG64) &rect, rect.sizeof
+        // );
+
+        GetClientRect((cast(Window) this.window).handle, &rect);
+        //GetWindowRect((cast(Window) this.window).handle, &rect);
 
         return [rect.right, rect.bottom];
     }

@@ -1038,13 +1038,11 @@ class GLShaderProgram : IShaderProgram
         return geometry;
     }
 
-    ref GLBuffer fromBind(uint id) @safe
+    GLBuffer fromBind(uint id) @safe
     {
-        foreach (ref MemoryUniform e; ublocks) {
-            if (e.id == id) return e.buffer;
-        }
+        import std.algorithm;
 
-        assert(0, "Cannot return non-exist binding!");
+        return ublocks.find!(a => a.id == id)[0].buffer;
     }
 
 override:
@@ -1090,14 +1088,19 @@ override:
             throw new Exception(msg);
         }
 
+        // BUG: GL драйвер что-то не хочет принимать такие данные, только свои.
         // if (mainShader().prepared.length != 0)
         // {
-        //     for (size_t i = 0; i < mainShader().prepared.length; i++)
+        //     import tida.graphics.shader;
+
+        //     foreach (i; 0 .. mainShader().prepared.length)
         //     {
-        //         uint usize = cast(uint) mainShader().prepared[i].sizeBuffer;
+        //         UBInfo e = mainShader().prepared[i];
+
+        //         uint usize = cast(uint) e.sizeBuffer;
 
         //         MemoryUniform mu;
-        //         mu.id = mainShader().prepared[i].id;
+        //         mu.id = e.id;
         //         mu.buffer = new GLBuffer(BufferType.uniform);
         //         mu.buffer.dataUsage(BuffUsageType.dynamicData);
         //         mu.buffer.allocate(usize);
@@ -1151,11 +1154,6 @@ override:
     void setUniformData(uint id, void[] data) @safe
     {
         fromBind(id).bindData(data);
-    }
-
-    void setUniformBuffer(uint id, IBuffer buffer) @safe
-    {
-        fromBind(id) = cast(GLBuffer) buffer;
     }
 
     IBuffer getUniformBuffer(uint id) @safe
@@ -1500,7 +1498,7 @@ class GLGraphManip : IGraphManip
         import bindbc.sdl;
 
         SDL_GLContext sdl_ctx;
-        tdw.Window window;
+        //tdw.Window window;
 
         void initializeSDLImpl() @trusted
         {

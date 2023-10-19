@@ -465,7 +465,7 @@ License: MIT
 +/
 module tida;
 
-export:
+public:
     import tida.runtime;
     import tida.window;
     import tida.event;

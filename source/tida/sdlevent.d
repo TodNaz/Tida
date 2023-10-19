@@ -82,6 +82,14 @@ class EventHandler : IEventHandler
     }
 
 override @trusted:
+    bool hasEvent()
+    {
+        SDL_Event last;
+        return SDL_PeepEvents(
+            &last, 1, SDL_GETEVENT, 0, uint.max
+        ) != 0;
+    }
+
     /++
     Moves to the next event. If there are no more events, it returns false, 
     otherwise, it throws true and the programmer can safely check which event 

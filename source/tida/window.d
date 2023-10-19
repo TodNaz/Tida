@@ -1001,8 +1001,7 @@ export:
     
         this.handle = CreateWindow( _title.toUTFz!(wchar*), 
                                     _title.toUTFz!(wchar*),
-                                    WS_CAPTION | WS_SYSMENU | WS_CLIPSIBLINGS | 
-                                    WS_CLIPCHILDREN | WS_THICKFRAME,
+                                    WS_CAPTION | WS_SYSMENU | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_THICKFRAME,
                                     posX, posY, this._widthInit, 
                                     this._heightInit, null, null, 
                                     runtime.instance, null);

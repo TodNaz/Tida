@@ -383,8 +383,6 @@ interface IShaderProgram
 
     void setUniformData(uint, void[]) @safe;
 
-    void setUniformBuffer(uint, IBuffer) @safe;
-
     IBuffer getUniformBuffer(uint) @safe;
 
     uint getUniformBufferAlign() @safe;
@@ -734,6 +732,7 @@ interface IGraphManip
 
     string[2] rendererInfo() @safe;
 
+    deprecated("Point size maybe not working in not opengl-like api's")
     void pointSize(float size) @safe;
 
     /// Initializes an abstraction object for loading a library.

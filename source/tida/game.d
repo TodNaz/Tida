@@ -315,9 +315,14 @@ export:
                 qclose();
             }
 
-            while (event.nextEvent)
+            foreach (_; event)
             {
-                if (event.isQuit)
+                if (event.isResize)
+                {
+                    renderer.api.update();
+                }
+
+                if (event.isQuit())
                 {
                     qclose();
                     return;
